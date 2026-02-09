@@ -1,6 +1,7 @@
 #include <SoftwareSerial.h>
 
 #define buzzerPin 8
+#define buttonPin 7
 #define SOFT_RX 2
 #define SOFT_TX 3
 
@@ -58,17 +59,22 @@ bool buzzerHasBuzzed = false;
 
 void setup() {
   pinMode(buzzerPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
   digitalWrite(buzzerPin, 0);
 
   Serial.begin(115200);
-  while (!Serial)
-    ;
   softSerial.begin(19200);
 
   Serial.println(F("UART ShotClock Decoder Ready"));
 }
 
 void loop() {
+  if (!digitalRead(buttonPin)) {
+    digitalWrite(buzzerPin, 1);
+  } else {
+    digitalWrite(buzzerPin, 0);
+  }
+
   if (!softSerial.available()) return;
   uint8_t b = softSerial.read();
 
