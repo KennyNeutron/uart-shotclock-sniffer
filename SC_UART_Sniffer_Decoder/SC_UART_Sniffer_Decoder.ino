@@ -1,9 +1,11 @@
 #include <SoftwareSerial.h>
 
-#define SOFT_RX 10
-#define SOFT_TX 11
+#define buzzerPin 8
+#define SOFT_RX 2
+#define SOFT_TX 3
 
 SoftwareSerial softSerial(SOFT_RX, SOFT_TX);
+
 
 // State machine
 enum {
@@ -40,7 +42,9 @@ uint8_t qtr, ballposs;
 uint8_t unknown1;
 
 // Helpers
-uint8_t scoreDigit(uint8_t b) { return (b == 0x0F) ? 0 : b; }
+uint8_t scoreDigit(uint8_t b) {
+  return (b == 0x0F) ? 0 : b;
+}
 
 const char* possText(uint8_t b) {
   if (b == 0x82) return "LEFT";
@@ -48,9 +52,17 @@ const char* possText(uint8_t b) {
   return "UNK";
 }
 
+bool buzzerFlag = false;
+uint8_t buzzerScore = 0;
+bool buzzerHasBuzzed = false;
+
 void setup() {
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, 0);
+
   Serial.begin(115200);
-  while (!Serial);
+  while (!Serial)
+    ;
   softSerial.begin(19200);
 
   Serial.println(F("UART ShotClock Decoder Ready"));
@@ -62,30 +74,80 @@ void loop() {
 
   switch (state) {
 
-    case WAIT_HEADER: if (b == 0x80) state = SC_ONES; break;
+    case WAIT_HEADER:
+      if (b == 0x80) state = SC_ONES;
+      break;
 
-    case SC_ONES: sc_o = b; state = SC_TENS; break;
-    case SC_TENS: sc_t = b; state = GT_SEC_ONES; break;
+    case SC_ONES:
+      sc_o = b;
+      state = SC_TENS;
+      break;
+    case SC_TENS:
+      sc_t = b;
+      state = GT_SEC_ONES;
+      break;
 
-    case GT_SEC_ONES: sec_o = b; state = GT_SEC_TENS; break;
-    case GT_SEC_TENS: sec_t = b; state = UNKNOWN1; break;
+    case GT_SEC_ONES:
+      sec_o = b;
+      state = GT_SEC_TENS;
+      break;
+    case GT_SEC_TENS:
+      sec_t = b;
+      state = UNKNOWN1;
+      break;
 
-    case UNKNOWN1: unknown1 = b; state = GT_MIN_ONES; break;
+    case UNKNOWN1:
+      unknown1 = b;
+      state = GT_MIN_ONES;
+      break;
 
-    case GT_MIN_ONES: min_o = b; state = GT_MIN_TENS; break;
-    case GT_MIN_TENS: min_t = b; state = GUEST_ONES; break;
+    case GT_MIN_ONES:
+      min_o = b;
+      state = GT_MIN_TENS;
+      break;
+    case GT_MIN_TENS:
+      min_t = b;
+      state = GUEST_ONES;
+      break;
 
-    case GUEST_ONES: guest_o = b; state = GUEST_TENS; break;
-    case GUEST_TENS: guest_t = b; state = GUEST_HUNDREDS; break;
-    case GUEST_HUNDREDS: guest_h = b; state = HOME_ONES; break;
+    case GUEST_ONES:
+      guest_o = b;
+      state = GUEST_TENS;
+      break;
+    case GUEST_TENS:
+      guest_t = b;
+      state = GUEST_HUNDREDS;
+      break;
+    case GUEST_HUNDREDS:
+      guest_h = b;
+      state = HOME_ONES;
+      break;
 
-    case HOME_ONES: home_o = b; state = HOME_TENS; break;
-    case HOME_TENS: home_t = b; state = HOME_HUNDREDS; break;
-    case HOME_HUNDREDS: home_h = b; state = GUEST_FOUL; break;
+    case HOME_ONES:
+      home_o = b;
+      state = HOME_TENS;
+      break;
+    case HOME_TENS:
+      home_t = b;
+      state = HOME_HUNDREDS;
+      break;
+    case HOME_HUNDREDS:
+      home_h = b;
+      state = GUEST_FOUL;
+      break;
 
-    case GUEST_FOUL: guest_foul = b; state = QTR; break;
-    case QTR: qtr = b; state = BALLPOSS; break;
-    case BALLPOSS: ballposs = b; state = HOME_FOUL; break;
+    case GUEST_FOUL:
+      guest_foul = b;
+      state = QTR;
+      break;
+    case QTR:
+      qtr = b;
+      state = BALLPOSS;
+      break;
+    case BALLPOSS:
+      ballposs = b;
+      state = HOME_FOUL;
+      break;
 
     case HOME_FOUL:
       home_foul = b;
@@ -95,15 +157,45 @@ void loop() {
       uint8_t seconds = (sec_t * 10) + sec_o;
       uint8_t minutes = (min_t * 10) + min_o;
 
+      if (sc_t == 0 && sc_o == 0 && minutes != 0 && !buzzerFlag) {
+        buzzerScore++;
+      } else if (sc_t == 0 && sc_o == 0 && seconds == 0 && minutes == 0 && !buzzerFlag) {
+        buzzerScore += 10;
+        buzzerFlag = true;
+      }
+
+      if (sc_t != 0 && sc_o != 0) {
+        buzzerFlag = false;
+        buzzerScore = 0;
+      }
+
+      if (buzzerScore >= 6 && buzzerScore <= 10 && !buzzerFlag && !buzzerHasBuzzed) {
+        digitalWrite(buzzerPin, 1);
+        delay(2000);
+        digitalWrite(buzzerPin, 0);
+        buzzerFlag = true;
+        buzzerHasBuzzed = true;
+      }
+
+      if (buzzerScore >= 60 && buzzerScore <= 100 && !buzzerFlag && !buzzerHasBuzzed) {
+        digitalWrite(buzzerPin, 1);
+        delay(5000);
+        digitalWrite(buzzerPin, 0);
+        buzzerFlag = true;
+        buzzerHasBuzzed = true;
+      }
+
+      if (sc_t == 1 && sc_o == 4) {
+        buzzerHasBuzzed = false;
+      } else if (sc_t == 2 && sc_o == 4) {
+        buzzerHasBuzzed = false;
+      }
+
       uint16_t guest_score =
-        scoreDigit(guest_h) * 100 +
-        scoreDigit(guest_t) * 10 +
-        guest_o;
+        scoreDigit(guest_h) * 100 + scoreDigit(guest_t) * 10 + guest_o;
 
       uint16_t home_score =
-        scoreDigit(home_h) * 100 +
-        scoreDigit(home_t) * 10 +
-        home_o;
+        scoreDigit(home_h) * 100 + scoreDigit(home_t) * 10 + home_o;
 
       // ONE clean line (auto-scroll friendly)
       Serial.print(F("SC "));
