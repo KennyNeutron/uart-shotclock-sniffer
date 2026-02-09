@@ -3,80 +3,139 @@
 #define SOFT_RX 10
 #define SOFT_TX 11
 
-SoftwareSerial softSerial(SOFT_RX, SOFT_TX); // RX, TX
+SoftwareSerial softSerial(SOFT_RX, SOFT_TX);
 
 // State machine
 enum {
-  WAIT_MARKER,
-  WAIT_SC_ONES,
-  WAIT_SC_TENS,
-  WAIT_GT_ONES,
-  WAIT_GT_TENS
+  WAIT_HEADER,
+  SC_ONES,
+  SC_TENS,
+  GT_SEC_ONES,
+  GT_SEC_TENS,
+  UNKNOWN1,
+  GT_MIN_ONES,
+  GT_MIN_TENS,
+  GUEST_ONES,
+  GUEST_TENS,
+  GUEST_HUNDREDS,
+  HOME_ONES,
+  HOME_TENS,
+  HOME_HUNDREDS,
+  GUEST_FOUL,
+  QTR,
+  BALLPOSS,
+  HOME_FOUL
 };
 
-uint8_t state = WAIT_MARKER;
+uint8_t state = WAIT_HEADER;
 
-// Shot clock
-uint8_t sc_ones = 0;
-uint8_t sc_tens = 0;
+// Raw bytes
+uint8_t sc_o, sc_t;
+uint8_t sec_o, sec_t;
+uint8_t min_o, min_t;
+uint8_t guest_o, guest_t, guest_h;
+uint8_t home_o, home_t, home_h;
+uint8_t guest_foul, home_foul;
+uint8_t qtr, ballposs;
+uint8_t unknown1;
 
-// Game time seconds
-uint8_t gt_ones = 0;
-uint8_t gt_tens = 0;
+// Helpers
+uint8_t scoreDigit(uint8_t b) { return (b == 0x0F) ? 0 : b; }
+
+const char* possText(uint8_t b) {
+  if (b == 0x82) return "LEFT";
+  if (b == 0x83) return "RIGHT";
+  return "UNK";
+}
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
-
   softSerial.begin(19200);
 
-  Serial.println(F("UART Decoder Ready"));
-  Serial.println(F("Waiting for 0x80 marker..."));
+  Serial.println(F("UART ShotClock Decoder Ready"));
 }
 
 void loop() {
-  if (softSerial.available()) {
-    uint8_t b = softSerial.read();
+  if (!softSerial.available()) return;
+  uint8_t b = softSerial.read();
 
-    switch (state) {
+  switch (state) {
 
-      case WAIT_MARKER:
-        if (b == 0x80) {
-          state = WAIT_SC_ONES;
-        }
-        break;
+    case WAIT_HEADER: if (b == 0x80) state = SC_ONES; break;
 
-      case WAIT_SC_ONES:
-        sc_ones = b;
-        state = WAIT_SC_TENS;
-        break;
+    case SC_ONES: sc_o = b; state = SC_TENS; break;
+    case SC_TENS: sc_t = b; state = GT_SEC_ONES; break;
 
-      case WAIT_SC_TENS:
-        sc_tens = b;
-        state = WAIT_GT_ONES;
-        break;
+    case GT_SEC_ONES: sec_o = b; state = GT_SEC_TENS; break;
+    case GT_SEC_TENS: sec_t = b; state = UNKNOWN1; break;
 
-      case WAIT_GT_ONES:
-        gt_ones = b;
-        state = WAIT_GT_TENS;
-        break;
+    case UNKNOWN1: unknown1 = b; state = GT_MIN_ONES; break;
 
-      case WAIT_GT_TENS:
-        gt_tens = b;
+    case GT_MIN_ONES: min_o = b; state = GT_MIN_TENS; break;
+    case GT_MIN_TENS: min_t = b; state = GUEST_ONES; break;
 
-        // Combine values
-        uint8_t shotclock = (sc_tens * 10) + sc_ones;
-        uint8_t gametime_seconds = (gt_tens * 10) + gt_ones;
+    case GUEST_ONES: guest_o = b; state = GUEST_TENS; break;
+    case GUEST_TENS: guest_t = b; state = GUEST_HUNDREDS; break;
+    case GUEST_HUNDREDS: guest_h = b; state = HOME_ONES; break;
 
-        // Output
-        Serial.print(F("ShotClock = "));
-        Serial.print(shotclock);
-        Serial.print(F(" | GameTime Seconds = "));
-        Serial.println(gametime_seconds);
+    case HOME_ONES: home_o = b; state = HOME_TENS; break;
+    case HOME_TENS: home_t = b; state = HOME_HUNDREDS; break;
+    case HOME_HUNDREDS: home_h = b; state = GUEST_FOUL; break;
 
-        // Reset for next frame
-        state = WAIT_MARKER;
-        break;
-    }
+    case GUEST_FOUL: guest_foul = b; state = QTR; break;
+    case QTR: qtr = b; state = BALLPOSS; break;
+    case BALLPOSS: ballposs = b; state = HOME_FOUL; break;
+
+    case HOME_FOUL:
+      home_foul = b;
+
+      // Decode
+      uint8_t shotclock = (sc_t * 10) + sc_o;
+      uint8_t seconds = (sec_t * 10) + sec_o;
+      uint8_t minutes = (min_t * 10) + min_o;
+
+      uint16_t guest_score =
+        scoreDigit(guest_h) * 100 +
+        scoreDigit(guest_t) * 10 +
+        guest_o;
+
+      uint16_t home_score =
+        scoreDigit(home_h) * 100 +
+        scoreDigit(home_t) * 10 +
+        home_o;
+
+      // ONE clean line (auto-scroll friendly)
+      Serial.print(F("SC "));
+      Serial.print(shotclock);
+
+      Serial.print(F(" | GT "));
+      Serial.print(minutes);
+      Serial.print(':');
+      if (seconds < 10) Serial.print('0');
+      Serial.print(seconds);
+
+      Serial.print(F(" | G "));
+      Serial.print(guest_score);
+      Serial.print(F(" (F "));
+      Serial.print(guest_foul);
+      Serial.print(')');
+
+      Serial.print(F(" | H "));
+      Serial.print(home_score);
+      Serial.print(F(" (F "));
+      Serial.print(home_foul);
+      Serial.print(')');
+
+      Serial.print(F(" | Q"));
+      Serial.print(qtr);
+
+      Serial.print(F(" | POSS "));
+      Serial.print(possText(ballposs));
+
+      Serial.println();
+
+      state = WAIT_HEADER;
+      break;
   }
 }
