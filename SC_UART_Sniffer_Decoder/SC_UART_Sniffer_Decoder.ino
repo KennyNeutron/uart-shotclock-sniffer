@@ -57,6 +57,10 @@ bool buzzerFlag = false;
 uint8_t buzzerScore = 0;
 bool buzzerHasBuzzed = false;
 
+bool endGame_buzz = false;
+uint8_t endGame_Score = 0;
+uint8_t endGame_Score_reset = 0;
+
 void setup() {
   pinMode(buzzerPin, OUTPUT);
   pinMode(buttonPin, INPUT_PULLUP);
@@ -168,14 +172,17 @@ void loop() {
       } else if (sc_t == 0 && sc_o == 0 && seconds == 0 && minutes == 0 && !buzzerFlag) {
         buzzerScore += 10;
         buzzerFlag = true;
+      } else if (sc_t != 0 && sc_o != 0 && seconds == 0 && minutes == 0 && !buzzerFlag) {
+        buzzerScore += 10;
+        buzzerFlag = true;
       }
 
-      if (sc_t != 0 && sc_o != 0) {
+      if (sc_t != 0 && sc_o != 0 && (minutes != 0 || seconds != 0)) {
         buzzerFlag = false;
         buzzerScore = 0;
       }
 
-      if (buzzerScore >= 6 && buzzerScore <= 10 && !buzzerFlag && !buzzerHasBuzzed) {
+      if (buzzerScore >= 3 && buzzerScore <= 6 && !buzzerFlag && !buzzerHasBuzzed) {
         digitalWrite(buzzerPin, 1);
         delay(2000);
         digitalWrite(buzzerPin, 0);
@@ -183,7 +190,8 @@ void loop() {
         buzzerHasBuzzed = true;
       }
 
-      if (buzzerScore >= 60 && buzzerScore <= 100 && !buzzerFlag && !buzzerHasBuzzed) {
+
+      if (buzzerScore >= 30 && buzzerScore <= 60 && !buzzerFlag && !buzzerHasBuzzed) {
         digitalWrite(buzzerPin, 1);
         delay(5000);
         digitalWrite(buzzerPin, 0);
@@ -191,17 +199,36 @@ void loop() {
         buzzerHasBuzzed = true;
       }
 
-      if (sc_t == 1 && sc_o == 4) {
+      if (sc_t == 1 && sc_o == 4 && !GT_XOR(minutes, seconds)) {
         buzzerHasBuzzed = false;
-      } else if (sc_t == 2 && sc_o == 4) {
+      } else if (sc_t == 2 && sc_o == 4 && !GT_XOR(minutes, seconds)) {
         buzzerHasBuzzed = false;
       }
 
-      uint16_t guest_score =
-        scoreDigit(guest_h) * 100 + scoreDigit(guest_t) * 10 + guest_o;
 
-      uint16_t home_score =
-        scoreDigit(home_h) * 100 + scoreDigit(home_t) * 10 + home_o;
+      if (GT_XOR(minutes, seconds)) {
+        endGame_Score++;
+        endGame_Score_reset = 0;
+      } else if (!GT_XOR(minutes, seconds)) {
+        endGame_Score = 0;
+        endGame_Score_reset++;
+      }
+
+      if (endGame_Score > 3 && endGame_Score < 6 && !endGame_buzz) {
+        digitalWrite(buzzerPin, 1);
+        delay(5000);
+        digitalWrite(buzzerPin, 0);
+        endGame_buzz = true;
+      }
+
+      if (endGame_Score_reset > 6 && endGame_Score_reset < 10) {
+        endGame_buzz = false;
+      }
+
+
+      uint16_t guest_score = scoreDigit(guest_h) * 100 + scoreDigit(guest_t) * 10 + guest_o;
+
+      uint16_t home_score = scoreDigit(home_h) * 100 + scoreDigit(home_t) * 10 + home_o;
 
       // ONE clean line (auto-scroll friendly)
       Serial.print(F("SC "));
@@ -236,4 +263,16 @@ void loop() {
       state = WAIT_HEADER;
       break;
   }
+}
+
+bool GT_XOR(uint8_t gt_min, uint8_t gt_sec) {
+  if (gt_min != 0x00 && gt_sec != 0x00) {
+    return false;
+  } else if (gt_min != 0x00 && gt_sec != 0x00) {
+    return false;
+  } else if (gt_min == 0x00 && gt_sec == 0x0F) {
+    return true;
+  }
+
+  return false;
 }
